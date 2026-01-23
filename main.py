@@ -6,13 +6,13 @@ import requests
 from datetime import datetime, timedelta, timezone
 
 # --- [설정값] ---
-# GitHub Secrets에 등록한 이름과 동일해야 합니다.
+# GitHub Secrets에 'WEBHOOK_QQQ'라는 이름으로 등록해야 합니다.
 DISCORD_WEBHOOK_URL = os.environ.get("WEBHOOK_QQQ") 
 TARGET_TICKER = "QQQ"
 MA_SHORT = 120
 MA_LONG = 233
 RSI_PERIOD = 14
-RSI_THRESHOLD = 40 # 35에서 40으로 상향 조정
+RSI_THRESHOLD = 40
 
 def calculate_rsi(series, period=14):
     delta = series.diff()
@@ -24,57 +24,62 @@ def calculate_rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 def main():
-    # 1. 한국 시간 설정
+    # 1. 한국 시간 설정 (KST)
     kst = timezone(timedelta(hours=9))
     now_kst = datetime.now(kst)
     today_str = now_kst.strftime("%Y-%m-%d")
 
-    print(f"🚀 {today_str} 전략 분석 시작 (조건: MA 120/233 AND RSI < {RSI_THRESHOLD})")
+    print(f"🚀 {today_str} QQQ 전략 분석 시작 (조건: MA 120/233 AND RSI < {RSI_THRESHOLD})")
 
-    # 2. 데이터 가져오기 (충분한 계산을 위해 2년치 데이터)
+    # 2. 데이터 다운로드
     data = yf.download(TARGET_TICKER, period="2y")
     if data.empty:
-        print("데이터를 가져오지 못했습니다.")
+        print("❌ 데이터를 가져오지 못했습니다.")
         return
 
-    # 데이터 정리
-    df = data['Close'].to_frame()
+    # 3. 데이터 정리 (yfinance 최신 버전 멀티인덱스 대응)
+    if isinstance(data.columns, pd.MultiIndex):
+        df = data['Close'].iloc[:, 0].to_frame()
+    else:
+        df = data[['Close']].copy()
+    
     df.columns = ['Close']
+    df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
 
-    # 3. 기술적 지표 계산
+    # 4. 지표 계산
     df['MA120'] = df['Close'].rolling(window=MA_SHORT).mean()
     df['MA233'] = df['Close'].rolling(window=MA_LONG).mean()
     df['RSI'] = calculate_rsi(df['Close'], RSI_PERIOD)
 
-    # 4. 최신 데이터 추출
+    # 5. 최신 데이터 추출
     last_row = df.iloc[-1]
-    curr_price = last_row['Close']
-    ma120 = last_row['MA120']
-    ma233 = last_row['MA233']
-    rsi = last_row['RSI']
+    curr_price = float(last_row['Close'])
+    ma120 = float(last_row['MA120'])
+    ma233 = float(last_row['MA233'])
+    rsi = float(last_row['RSI'])
 
-    # --- [핵심 조건 검사: AND] ---
-    # 조건 A: 이평선 이탈 (120일선 또는 233일선보다 낮음)
-    is_under_ma = curr_price < max(ma120, ma233)
-    # 조건 B: RSI 40 미만
+    # --- [매수 신호 판정] ---
+    # 조건 1: 이평선 기준 (120일선 또는 233일선 중 높은 선보다 주가가 낮은지)
+    target_ma = max(ma120, ma233)
+    is_under_ma = curr_price < target_ma
+    
+    # 조건 2: RSI 기준
     is_low_rsi = rsi < RSI_THRESHOLD
 
-    print(f"> 현재가: ${curr_price:.2f}")
-    print(f"> 기준 이평선(Max): ${max(ma120, ma233):.2f} (MA120: {ma120:.2f}, MA233: {ma233:.2f})")
-    print(f"> 현재 RSI: {rsi:.2f}")
+    print(f"📊 분석 결과: 현재가 ${curr_price:.2f} / 기준선 ${target_ma:.2f} / RSI {rsi:.2f}")
 
-    # 5. 두 조건 모두 만족 시 디스코드 전송
+    # 6. AND 조건 만족 시 알림 전송
     if is_under_ma and is_low_rsi:
         send_discord(today_str, curr_price, rsi, ma120, ma233)
     else:
-        print("💡 매수 조건이 충족되지 않았습니다. (알림 미전송)")
+        print("💡 조건이 충족되지 않아 알림을 보내지 않았습니다.")
 
 def send_discord(date, price, rsi, ma120, ma233):
     if not DISCORD_WEBHOOK_URL:
-        print("웹훅 URL이 설정되지 않았습니다.")
+        print("⚠️ 디스코드 웹훅 URL이 설정되지 않았습니다.")
         return
 
-    content = f"❗ **[{date}] TQQQ 강력 매수 신호 발생! (5만원 투자)**"
+    content = f"❗ **[{date}] TQQQ 강력 매수 신호 발생!**"
 
     description = (
         f"**[시장 상태 분석]**\n"
@@ -83,8 +88,8 @@ def send_discord(date, price, rsi, ma120, ma233):
         f"**[이동평균선 정보]**\n"
         f"• MA120: `${ma120:.2f}`\n"
         f"• MA233: `${ma233:.2f}`\n\n"
-        f"✅ **장기 추세선 아래 + 공포 구간(RSI 40)**이 겹쳤습니다.\n"
-        f"👉 **TQQQ 50,000원 매수**를 진행하세요!"
+        f"✅ **장기 추세선 이탈과 과매도 구간이 겹쳤습니다.**\n"
+        f"👉 **TQQQ 50,000원 분할 매수를 추천합니다!**"
     )
 
     payload = {
@@ -92,12 +97,12 @@ def send_discord(date, price, rsi, ma120, ma233):
         "embeds": [{
             "title": "📈 QQQ 기술적 분석 알림 (AND 전략)",
             "description": description,
-            "color": 15158332, # 빨간색 계열
-            "footer": {"text": "TQQQ Sniper Scheduler"}
+            "color": 15158332,
+            "footer": {"text": "TQQQ Sniper Bot"}
         }]
     }
     requests.post(DISCORD_WEBHOOK_URL, json=payload)
-    print("✅ 디스코드 알림 전송 완료")
+    print("✅ 디스코드 알림이 성공적으로 전송되었습니다.")
 
 if __name__ == "__main__":
     main()
