@@ -5,24 +5,27 @@ import os
 from datetime import datetime, timedelta, timezone
 
 # --- [웹훅 설정] ---
-QQQ_WEBHOOK = os.environ.get("WEBHOOK_QQQ")       # 일일 현황 보고용
-SIGNAL_WEBHOOK = os.environ.get("WEBHOOK_SIGNAL") # TQQQ 매수 신호용
-RSI_WEBHOOK = os.environ.get("WEBHOOK_RSI")       # 우량주 스캐너용
+# 1. QQQ 매일 현황 보고용
+QQQ_WEBHOOK = os.environ.get("WEBHOOK_QQQ")
+# 2. TQQQ 매수 신호용
+SIGNAL_WEBHOOK = os.environ.get("WEBHOOK_SIGNAL")
+# 3. 우량주 스캐너용 (RSI 25 & 수익성 좋은 기업)
+RSI_WEBHOOK = os.environ.get("WEBHOOK_RSI")
 
 # --- [전략 설정값] ---
-# 1. QQQ 전략
+
+# [전략 1] QQQ 감시 (TQQQ 매수용)
 QQQ_TICKER = "QQQ"
 MA_SHORT = 120
 MA_LONG = 233
-RSI_PERIOD = 14
-RSI_THRESHOLD = 40
+QQQ_RSI_THRESHOLD = 40  # QQQ는 변동성이 적으므로 40 유지
 
-# 2. 우량주 스캐너 설정
-SCANNER_RSI_THRESHOLD = 40        # RSI 40 미만
-MARKET_CAP_LIMIT = 200_000_000_000 # 시총 2000억 달러 이상
-PROFIT_MARGIN_LIMIT = 0.2         # 순이익률 20% 이상 (0.2)
+# [전략 2] 슈퍼 우량주 스캐너 설정
+SCANNER_RSI_THRESHOLD = 25        # 🔥 RSI 25 미만 (매우 엄격한 과매도 기준)
+MARKET_CAP_LIMIT = 200_000_000_000 # 시총 2000억 달러 이상 (약 260조 원)
+PROFIT_MARGIN_LIMIT = 0.2         # 순이익률 20% 이상 (돈 잘 버는 회사만)
 
-# 스캔할 주요 우량주 리스트
+# 검사할 주요 우량주 리스트 (Big Tech & Blue Chip)
 WATCHLIST = [
     "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "BRK-B", "LLY", 
     "AVGO", "JPM", "WMT", "XOM", "V", "UNH", "MA", "PG", "JNJ", "COST", "HD", 
@@ -40,7 +43,7 @@ def calculate_rsi(series, period=14):
     rs = ema_up / ema_down
     return 100 - (100 / (1 + rs))
 
-# --- [기능 1] QQQ 전략 분석 함수 ---
+# --- [기능 1] QQQ 전략 분석 ---
 def run_qqq_strategy(today_str):
     print("🚀 [1/2] QQQ 전략 분석 시작...")
     data = yf.download(QQQ_TICKER, period="2y", progress=False)
@@ -56,7 +59,7 @@ def run_qqq_strategy(today_str):
 
     df['MA120'] = df['Close'].rolling(window=MA_SHORT).mean()
     df['MA233'] = df['Close'].rolling(window=MA_LONG).mean()
-    df['RSI'] = calculate_rsi(df['Close'], RSI_PERIOD)
+    df['RSI'] = calculate_rsi(df['Close'], 14)
 
     last_row = df.iloc[-1]
     curr_price = float(last_row['Close'])
@@ -77,22 +80,22 @@ def run_qqq_strategy(today_str):
         requests.post(QQQ_WEBHOOK, json=payload)
 
     # 2. 매수 신호 (TQQQ 진입)
-    if curr_price < target_ma and rsi < RSI_THRESHOLD:
+    if curr_price < target_ma and rsi < QQQ_RSI_THRESHOLD:
         if SIGNAL_WEBHOOK:
             payload = {
                 "content": "🚨 **[TQQQ 매수 신호] 조건 충족!**",
                 "embeds": [{
                     "title": "🎯 진입 타이밍 발견",
-                    "description": f"• 주가 < 이평선 (${target_ma:.2f})\n• RSI < {RSI_THRESHOLD} (현재 {rsi:.2f})\n👉 **매수 추천**",
+                    "description": f"• 주가 < 이평선 (${target_ma:.2f})\n• RSI < {QQQ_RSI_THRESHOLD} (현재 {rsi:.2f})\n👉 **매수 추천**",
                     "color": 15158332 # 빨간색
                 }]
             }
             requests.post(SIGNAL_WEBHOOK, json=payload)
             print("✅ TQQQ 매수 신호 전송됨")
 
-# --- [기능 2] 우량주 스캐너 함수 (재무분석 추가) ---
+# --- [기능 2] 우량주 스캐너 (RSI 25 & Margin 20%) ---
 def run_scanner(today_str):
-    print("🔭 [2/2] 슈퍼 우량주 스캐너 가동 (RSI + Net Margin)...")
+    print(f"🔭 [2/2] 슈퍼 우량주 스캐너 가동 (RSI < {SCANNER_RSI_THRESHOLD})...")
     data = yf.download(WATCHLIST, period="6mo", progress=False)
     if data.empty: return
 
@@ -113,19 +116,19 @@ def run_scanner(today_str):
             current_rsi = rsi_series.iloc[-1]
             current_price = series.iloc[-1]
 
-            # 1차 필터: RSI 40 미만 (과매도)
+            # 필터 1: RSI 25 미만 (초과매도)
             if current_rsi < SCANNER_RSI_THRESHOLD:
                 print(f"Candidate found: {ticker} (RSI {current_rsi:.2f})")
                 
-                # 2차 필터: 재무 정보 조회 (시총 & 순이익률)
+                # 필터 2: 재무 정보 (시총 & 순이익률)
                 try:
                     ticker_obj = yf.Ticker(ticker)
                     info = ticker_obj.info
                     
                     cap = info.get('marketCap', 0)
-                    margin = info.get('profitMargins', 0) # 순이익률 (0.2 = 20%)
+                    margin = info.get('profitMargins', 0)
                     
-                    # 시총 2000억불 이상 AND 순이익률 20% 이상
+                    # 시총 2000억불 & 순이익률 20%
                     if cap >= MARKET_CAP_LIMIT and margin >= PROFIT_MARGIN_LIMIT:
                         found_list.append({
                             'ticker': ticker,
@@ -147,18 +150,19 @@ def run_scanner(today_str):
         for s in found_list:
             description += (
                 f"**{s['ticker']}** (${s['price']:.2f})\n"
-                f"📉 RSI: `{s['rsi']:.2f}`\n"
-                f"💰 Margin: `{s['margin']*100:.1f}%` (순이익률)\n"
+                f"🔥 **RSI: {s['rsi']:.2f}** (Extreme Oversold)\n"
+                f"💰 Margin: `{s['margin']*100:.1f}%`\n"
                 f"🏢 Cap: `${s['cap']/1_000_000_000:.1f}B`\n"
                 f"-------------------\n"
             )
 
         payload = {
-            "content": f"📡 **[{today_str}] 저평가된 '슈퍼 우량주' 발견!**",
+            "content": f"📡 **[{today_str}] 긴급! RSI 25 미만 슈퍼 우량주 발견**",
             "embeds": [{
-                "title": f"조건: RSI < 40 & Margin > 20% & Big Cap",
+                "title": f"💎 줍줍 기회 포착 (RSI < {SCANNER_RSI_THRESHOLD})",
                 "description": description,
-                "color": 16776960 # 노란색
+                "color": 16711680, # 진한 빨간색 (긴급)
+                "footer": {"text": "이 신호는 매우 드물게 발생합니다."}
             }]
         }
         requests.post(RSI_WEBHOOK, json=payload)
@@ -170,7 +174,6 @@ def main():
     kst = timezone(timedelta(hours=9))
     today_str = datetime.now(kst).strftime("%Y-%m-%d")
     
-    # 두 기능 순차 실행
     run_qqq_strategy(today_str)
     print("-" * 30)
     run_scanner(today_str)
