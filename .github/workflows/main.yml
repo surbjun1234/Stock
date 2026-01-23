@@ -4,7 +4,7 @@ on:
   schedule:
     # 한국 시간(KST) 23:00 -> UTC 14:00 (14시 + 9시간 = 23시)
     - cron: '0 14 * * *'
-  workflow_dispatch: # 필요할 때 수동으로 실행 가능
+  workflow_dispatch: # 버튼을 눌러서 수동으로 즉시 실행 가능
 
 jobs:
   build:
@@ -17,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.10' # yfinance 최신 문법 호환을 위해 3.10 이상 사용
 
       - name: Install dependencies
         run: |
@@ -26,5 +26,6 @@ jobs:
 
       - name: Run analysis
         env:
-          WEBHOOK_QQQ: ${{ secrets.WEBHOOK_QQQ }}
+          # 매수 신호 발생 시 메시지를 보낼 전용 웹훅 주소
+          WEBHOOK_SIGNAL: ${{ secrets.WEBHOOK_SIGNAL }}
         run: python main.py
