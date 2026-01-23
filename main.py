@@ -151,18 +151,16 @@ def run_scanner(today_str):
             description += (
                 f"**{s['ticker']}** (${s['price']:.2f})\n"
                 f"🔥 **RSI: {s['rsi']:.2f}** (Extreme Oversold)\n"
-                f"💰 Margin: `{s['margin']*100:.1f}%`\n"
-                f"🏢 Cap: `${s['cap']/1_000_000_000:.1f}B`\n"
                 f"-------------------\n"
             )
 
         payload = {
-            "content": f"📡 **[{today_str}] 긴급! RSI 25 미만 슈퍼 우량주 발견**",
+            "content": f"📡 **[{today_str}]  대형주 과매도 알림 **",
             "embeds": [{
-                "title": f"💎 줍줍 기회 포착 (RSI < {SCANNER_RSI_THRESHOLD})",
+                "title": f"RSI < {SCANNER_RSI_THRESHOLD} 인 대형주 리스트",
                 "description": description,
                 "color": 16711680, # 진한 빨간색 (긴급)
-                "footer": {"text": "이 신호는 매우 드물게 발생합니다."}
+                "footer": {"text": "RSI FINDER"}
             }]
         }
         requests.post(RSI_WEBHOOK, json=payload)
