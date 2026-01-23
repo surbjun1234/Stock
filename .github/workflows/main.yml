@@ -1,8 +1,9 @@
-name: QQQ Strategy Notifier
+name: Stock Analysis Bot
 
 on:
   schedule:
-    - cron: '0 14 * * *' # 한국 시간 23:00
+    # 한국 시간 오후 11:00 (UTC 14:00)
+    - cron: '0 14 * * *'
   workflow_dispatch:
 
 jobs:
@@ -25,7 +26,10 @@ jobs:
 
       - name: Run analysis
         env:
-          # 두 개의 Secret을 모두 환경변수로 등록
+          # 1. QQQ 매일 현황용
           WEBHOOK_QQQ: ${{ secrets.WEBHOOK_QQQ }}
+          # 2. TQQQ 매수 신호용
           WEBHOOK_SIGNAL: ${{ secrets.WEBHOOK_SIGNAL }}
+          # 3. 우량주 스캐너용 (새로 추가)
+          WEBHOOK_RSI: ${{ secrets.WEBHOOK_RSI }}
         run: python main.py
