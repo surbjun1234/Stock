@@ -150,17 +150,15 @@ def run_scanner(today_str):
         for s in found_list:
             description += (
                 f"**{s['ticker']}** (${s['price']:.2f})\n"
-                f"🔥 **RSI: {s['rsi']:.2f}** (Extreme Oversold)\n"
+                f"**RSI: {s['rsi']:.2f}** (Extreme Oversold)\n"
                 f"-------------------\n"
             )
 
         payload = {
             "content": f"📡 **[{today_str}]  대형주 과매도 알림 **",
             "embeds": [{
-                "title": f"RSI < {SCANNER_RSI_THRESHOLD} 인 대형주 리스트",
                 "description": description,
                 "color": 16711680, # 진한 빨간색 (긴급)
-                "footer": {"text": "RSI FINDER"}
             }]
         }
         requests.post(RSI_WEBHOOK, json=payload)
