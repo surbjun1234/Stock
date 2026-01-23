@@ -9,15 +9,20 @@ QQQ_WEBHOOK = os.environ.get("WEBHOOK_QQQ")       # 일일 현황 보고용
 SIGNAL_WEBHOOK = os.environ.get("WEBHOOK_SIGNAL") # TQQQ 매수 신호용
 RSI_WEBHOOK = os.environ.get("WEBHOOK_RSI")       # 우량주 스캐너용
 
-# --- [설정값] ---
+# --- [전략 설정값] ---
+# 1. QQQ 전략
 QQQ_TICKER = "QQQ"
 MA_SHORT = 120
 MA_LONG = 233
 RSI_PERIOD = 14
 RSI_THRESHOLD = 40
-MARKET_CAP_LIMIT = 200_000_000_000 # 2000억 달러
 
-# 스캔할 주요 우량주 리스트 (Tech, Finance, Health, Consumer Top)
+# 2. 우량주 스캐너 설정
+SCANNER_RSI_THRESHOLD = 40        # RSI 40 미만
+MARKET_CAP_LIMIT = 200_000_000_000 # 시총 2000억 달러 이상
+PROFIT_MARGIN_LIMIT = 0.2         # 순이익률 20% 이상 (0.2)
+
+# 스캔할 주요 우량주 리스트
 WATCHLIST = [
     "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "BRK-B", "LLY", 
     "AVGO", "JPM", "WMT", "XOM", "V", "UNH", "MA", "PG", "JNJ", "COST", "HD", 
@@ -34,13 +39,6 @@ def calculate_rsi(series, period=14):
     ema_down = down.ewm(com=period - 1, adjust=False).mean()
     rs = ema_up / ema_down
     return 100 - (100 / (1 + rs))
-
-def get_market_cap(ticker):
-    try:
-        info = yf.Ticker(ticker).info
-        return info.get('marketCap', 0)
-    except:
-        return 0
 
 # --- [기능 1] QQQ 전략 분석 함수 ---
 def run_qqq_strategy(today_str):
@@ -67,18 +65,18 @@ def run_qqq_strategy(today_str):
     rsi = float(last_row['RSI'])
     target_ma = max(ma120, ma233)
 
-    # 1. 일일 보고 전송
+    # 1. 일일 보고 (QQQ 현황)
     if QQQ_WEBHOOK:
         payload = {
             "content": f"📅 **{today_str} QQQ 일일 현황**",
             "embeds": [{
                 "description": f"Price: `${curr_price:.2f}`\nRSI: `{rsi:.2f}`\nMA120: `${ma120:.2f}`",
-                "color": 3447003
+                "color": 3447003 # 파란색
             }]
         }
         requests.post(QQQ_WEBHOOK, json=payload)
 
-    # 2. 매수 신호 전송 (AND 조건)
+    # 2. 매수 신호 (TQQQ 진입)
     if curr_price < target_ma and rsi < RSI_THRESHOLD:
         if SIGNAL_WEBHOOK:
             payload = {
@@ -86,15 +84,15 @@ def run_qqq_strategy(today_str):
                 "embeds": [{
                     "title": "🎯 진입 타이밍 발견",
                     "description": f"• 주가 < 이평선 (${target_ma:.2f})\n• RSI < {RSI_THRESHOLD} (현재 {rsi:.2f})\n👉 **매수 추천**",
-                    "color": 15158332
+                    "color": 15158332 # 빨간색
                 }]
             }
             requests.post(SIGNAL_WEBHOOK, json=payload)
             print("✅ TQQQ 매수 신호 전송됨")
 
-# --- [기능 2] 우량주 스캐너 함수 ---
+# --- [기능 2] 우량주 스캐너 함수 (재무분석 추가) ---
 def run_scanner(today_str):
-    print("🔭 [2/2] 우량주 스캐너 가동...")
+    print("🔭 [2/2] 슈퍼 우량주 스캐너 가동 (RSI + Net Margin)...")
     data = yf.download(WATCHLIST, period="6mo", progress=False)
     if data.empty: return
 
@@ -115,18 +113,31 @@ def run_scanner(today_str):
             current_rsi = rsi_series.iloc[-1]
             current_price = series.iloc[-1]
 
-            # RSI 40 미만이면 시총 검사 진행 (API 절약)
-            if current_rsi < RSI_THRESHOLD:
-                print(f"Candidate: {ticker} (RSI {current_rsi:.2f})")
-                cap = get_market_cap(ticker)
+            # 1차 필터: RSI 40 미만 (과매도)
+            if current_rsi < SCANNER_RSI_THRESHOLD:
+                print(f"Candidate found: {ticker} (RSI {current_rsi:.2f})")
                 
-                if cap >= MARKET_CAP_LIMIT:
-                    found_list.append({
-                        'ticker': ticker,
-                        'price': current_price,
-                        'rsi': current_rsi,
-                        'cap': cap
-                    })
+                # 2차 필터: 재무 정보 조회 (시총 & 순이익률)
+                try:
+                    ticker_obj = yf.Ticker(ticker)
+                    info = ticker_obj.info
+                    
+                    cap = info.get('marketCap', 0)
+                    margin = info.get('profitMargins', 0) # 순이익률 (0.2 = 20%)
+                    
+                    # 시총 2000억불 이상 AND 순이익률 20% 이상
+                    if cap >= MARKET_CAP_LIMIT and margin >= PROFIT_MARGIN_LIMIT:
+                        found_list.append({
+                            'ticker': ticker,
+                            'price': current_price,
+                            'rsi': current_rsi,
+                            'cap': cap,
+                            'margin': margin
+                        })
+                        print(f"👉 Confirmed: {ticker} (Margin: {margin*100:.1f}%)")
+                except Exception as e:
+                    print(f"Info fetch fail for {ticker}: {e}")
+
         except Exception as e:
             print(f"Error {ticker}: {e}")
 
@@ -134,12 +145,18 @@ def run_scanner(today_str):
     if found_list and RSI_WEBHOOK:
         description = ""
         for s in found_list:
-            description += f"**{s['ticker']}**: RSI `{s['rsi']:.2f}` / ${s['price']:.2f}\n"
+            description += (
+                f"**{s['ticker']}** (${s['price']:.2f})\n"
+                f"📉 RSI: `{s['rsi']:.2f}`\n"
+                f"💰 Margin: `{s['margin']*100:.1f}%` (순이익률)\n"
+                f"🏢 Cap: `${s['cap']/1_000_000_000:.1f}B`\n"
+                f"-------------------\n"
+            )
 
         payload = {
-            "content": f"📡 **[{today_str}] 과매도 우량주 발견!**",
+            "content": f"📡 **[{today_str}] 저평가된 '슈퍼 우량주' 발견!**",
             "embeds": [{
-                "title": f"RSI < {RSI_THRESHOLD} & Cap > $200B",
+                "title": f"조건: RSI < 40 & Margin > 20% & Big Cap",
                 "description": description,
                 "color": 16776960 # 노란색
             }]
