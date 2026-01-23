@@ -71,7 +71,7 @@ def run_qqq_strategy(today_str):
     # 1. 일일 보고 (QQQ 현황)
     if QQQ_WEBHOOK:
         payload = {
-            "content": f"📅 **{today_str} QQQ 일일 현황**",
+            "content": f"📅 **[{today_str}] QQQ 일일 현황**",
             "embeds": [{
                 "description": f"Price: `${curr_price:.2f}`\nRSI: `{rsi:.2f}`\nMA120: `${ma120:.2f}`",
                 "color": 3447003 # 파란색
