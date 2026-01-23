@@ -1,20 +1,30 @@
 import yfinance as yf
 import pandas as pd
-import numpy as np
-import os
 import requests
+import os
 from datetime import datetime, timedelta, timezone
 
-# --- [설정값] ---
-# GitHub Secrets에 각각 등록해야 합니다.
-QQQ_WEBHOOK = os.environ.get("WEBHOOK_QQQ")     # 매일 현황 보고용
-SIGNAL_WEBHOOK = os.environ.get("WEBHOOK_SIGNAL") # 매수 신호 발생용
+# --- [웹훅 설정] ---
+QQQ_WEBHOOK = os.environ.get("WEBHOOK_QQQ")       # 일일 현황 보고용
+SIGNAL_WEBHOOK = os.environ.get("WEBHOOK_SIGNAL") # TQQQ 매수 신호용
+RSI_WEBHOOK = os.environ.get("WEBHOOK_RSI")       # 우량주 스캐너용
 
-TARGET_TICKER = "QQQ"
+# --- [설정값] ---
+QQQ_TICKER = "QQQ"
 MA_SHORT = 120
 MA_LONG = 233
 RSI_PERIOD = 14
 RSI_THRESHOLD = 40
+MARKET_CAP_LIMIT = 200_000_000_000 # 2000억 달러
+
+# 스캔할 주요 우량주 리스트 (Tech, Finance, Health, Consumer Top)
+WATCHLIST = [
+    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "BRK-B", "LLY", 
+    "AVGO", "JPM", "WMT", "XOM", "V", "UNH", "MA", "PG", "JNJ", "COST", "HD", 
+    "ABBV", "ORCL", "BAC", "KO", "CRM", "NFLX", "CVX", "MRK", "AMD", "PEP", 
+    "ADBE", "LIN", "TMO", "MCD", "CSCO", "ACN", "ABT", "DHR", "DIS", "NKE",
+    "TM", "NVO", "ASML", "SAP", "AZN", "BABA", "PDD"
+]
 
 def calculate_rsi(series, period=14):
     delta = series.diff()
@@ -25,18 +35,19 @@ def calculate_rsi(series, period=14):
     rs = ema_up / ema_down
     return 100 - (100 / (1 + rs))
 
-def main():
-    kst = timezone(timedelta(hours=9))
-    now_kst = datetime.now(kst)
-    today_str = now_kst.strftime("%Y-%m-%d")
+def get_market_cap(ticker):
+    try:
+        info = yf.Ticker(ticker).info
+        return info.get('marketCap', 0)
+    except:
+        return 0
 
-    print(f"🚀 {today_str} 전략 분석 시작...")
-
-    # 1. 데이터 다운로드
-    data = yf.download(TARGET_TICKER, period="2y")
+# --- [기능 1] QQQ 전략 분석 함수 ---
+def run_qqq_strategy(today_str):
+    print("🚀 [1/2] QQQ 전략 분석 시작...")
+    data = yf.download(QQQ_TICKER, period="2y", progress=False)
     if data.empty: return
 
-    # 2. 데이터 정리
     if isinstance(data.columns, pd.MultiIndex):
         df = data['Close'].iloc[:, 0].to_frame()
     else:
@@ -45,7 +56,6 @@ def main():
     df.columns = ['Close']
     df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
 
-    # 3. 지표 계산
     df['MA120'] = df['Close'].rolling(window=MA_SHORT).mean()
     df['MA233'] = df['Close'].rolling(window=MA_LONG).mean()
     df['RSI'] = calculate_rsi(df['Close'], RSI_PERIOD)
@@ -57,52 +67,96 @@ def main():
     rsi = float(last_row['RSI'])
     target_ma = max(ma120, ma233)
 
-    # 4. [매일 실행] QQQ 채널에 현황 보고
-    send_daily_report(today_str, curr_price, rsi, ma120, ma233)
+    # 1. 일일 보고 전송
+    if QQQ_WEBHOOK:
+        payload = {
+            "content": f"📅 **{today_str} QQQ 일일 현황**",
+            "embeds": [{
+                "description": f"Price: `${curr_price:.2f}`\nRSI: `{rsi:.2f}`\nMA120: `${ma120:.2f}`",
+                "color": 3447003
+            }]
+        }
+        requests.post(QQQ_WEBHOOK, json=payload)
 
-    # 5. [조건 만족 시] SIGNAL 채널에 매수 신호 전송
+    # 2. 매수 신호 전송 (AND 조건)
     if curr_price < target_ma and rsi < RSI_THRESHOLD:
-        send_buy_signal(today_str, curr_price, rsi, ma120, ma233)
+        if SIGNAL_WEBHOOK:
+            payload = {
+                "content": "🚨 **[TQQQ 매수 신호] 조건 충족!**",
+                "embeds": [{
+                    "title": "🎯 진입 타이밍 발견",
+                    "description": f"• 주가 < 이평선 (${target_ma:.2f})\n• RSI < {RSI_THRESHOLD} (현재 {rsi:.2f})\n👉 **매수 추천**",
+                    "color": 15158332
+                }]
+            }
+            requests.post(SIGNAL_WEBHOOK, json=payload)
+            print("✅ TQQQ 매수 신호 전송됨")
+
+# --- [기능 2] 우량주 스캐너 함수 ---
+def run_scanner(today_str):
+    print("🔭 [2/2] 우량주 스캐너 가동...")
+    data = yf.download(WATCHLIST, period="6mo", progress=False)
+    if data.empty: return
+
+    if isinstance(data.columns, pd.MultiIndex):
+        closes = data['Close']
     else:
-        print("💡 매수 조건은 아닙니다.")
+        closes = data['Close'].to_frame()
 
-def send_daily_report(date, price, rsi, ma120, ma233):
-    if not QQQ_WEBHOOK: return
-    
-    payload = {
-        "content": f"📅 **{date} QQQ 일일 현황 보고**",
-        "embeds": [{
-            "title": "🔍 현재 시장 지표",
-            "description": (
-                f"• 현재가: `${price:.2f}`\n"
-                f"• RSI: `{rsi:.2f}`\n"
-                f"• MA120: `${ma120:.2f}`\n"
-                f"• MA233: `${ma233:.2f}`"
-            ),
-            "color": 3447003 # 파란색
-        }]
-    }
-    requests.post(QQQ_WEBHOOK, json=payload)
-    print("✅ 일일 현황 보고 완료")
+    found_list = []
 
-def send_buy_signal(date, price, rsi, ma120, ma233):
-    if not SIGNAL_WEBHOOK: return
+    for ticker in WATCHLIST:
+        try:
+            if ticker not in closes.columns: continue
+            series = closes[ticker].dropna()
+            if len(series) < 15: continue
+
+            rsi_series = calculate_rsi(series)
+            current_rsi = rsi_series.iloc[-1]
+            current_price = series.iloc[-1]
+
+            # RSI 40 미만이면 시총 검사 진행 (API 절약)
+            if current_rsi < RSI_THRESHOLD:
+                print(f"Candidate: {ticker} (RSI {current_rsi:.2f})")
+                cap = get_market_cap(ticker)
+                
+                if cap >= MARKET_CAP_LIMIT:
+                    found_list.append({
+                        'ticker': ticker,
+                        'price': current_price,
+                        'rsi': current_rsi,
+                        'cap': cap
+                    })
+        except Exception as e:
+            print(f"Error {ticker}: {e}")
+
+    # 결과 전송
+    if found_list and RSI_WEBHOOK:
+        description = ""
+        for s in found_list:
+            description += f"**{s['ticker']}**: RSI `{s['rsi']:.2f}` / ${s['price']:.2f}\n"
+
+        payload = {
+            "content": f"📡 **[{today_str}] 과매도 우량주 발견!**",
+            "embeds": [{
+                "title": f"RSI < {RSI_THRESHOLD} & Cap > $200B",
+                "description": description,
+                "color": 16776960 # 노란색
+            }]
+        }
+        requests.post(RSI_WEBHOOK, json=payload)
+        print(f"✅ 스캐너 알림 전송됨 ({len(found_list)}개)")
+    else:
+        print("💡 스캐너: 조건에 맞는 종목 없음")
+
+def main():
+    kst = timezone(timedelta(hours=9))
+    today_str = datetime.now(kst).strftime("%Y-%m-%d")
     
-    payload = {
-        "content": "🚨 **[TQQQ 매수 저격] 신호 발생!**",
-        "embeds": [{
-            "title": "🎯 지금이 매수 타이밍입니다!",
-            "description": (
-                f"🔥 **조건 충족 (AND)**\n"
-                f"• 주가 < 이평선 (기준: ${max(ma120, ma233):.2f})\n"
-                f"• RSI < {RSI_THRESHOLD} (현재: {rsi:.2f})\n\n"
-                f"👉 **TQQQ 50,000원 매수를 진행하세요!**"
-            ),
-            "color": 15158332 # 빨간색
-        }]
-    }
-    requests.post(SIGNAL_WEBHOOK, json=payload)
-    print("✅ 매수 신호 전송 완료")
+    # 두 기능 순차 실행
+    run_qqq_strategy(today_str)
+    print("-" * 30)
+    run_scanner(today_str)
 
 if __name__ == "__main__":
     main()
