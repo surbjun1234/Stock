@@ -3,7 +3,7 @@ name: Stock Analysis Bot
 on:
   schedule:
     # 한국 시간 오후 11:00 (UTC 14:00)
-    - cron: '17 18 * * *'
+    - cron: '47 * * * *'
   workflow_dispatch:
 
 jobs:
