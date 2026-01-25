@@ -1,12 +1,16 @@
 name: Stock Analysis Bot
 
 on:
-  # 외부 크론(cron-job.org)에서 신호를 보낼 때 실행되는 트리거
+  # 외부(cron-job.org)에서 보내는 신호 받기
   repository_dispatch:
     types: [stock-check]
     
-  # 깃허브 웹사이트에서 수동으로 버튼 눌러 실행하고 싶을 때 사용
+  # 수동 실행 버튼
   workflow_dispatch:
+
+# ★★★ 중요: 파일 쓰기(Commit) 권한 부여 ★★★
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -23,13 +27,22 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install yfinance pandas numpy requests
 
       - name: Run analysis
         env:
-          # 깃허브 Settings > Secrets and variables > Actions에 등록된 키값들
           WEBHOOK_QQQ: ${{ secrets.WEBHOOK_QQQ }}
           WEBHOOK_SIGNAL: ${{ secrets.WEBHOOK_SIGNAL }}
           WEBHOOK_RSI: ${{ secrets.WEBHOOK_RSI }}
         run: python main.py
+
+      # ★★★ 상태 파일 변경 시 저장(Commit & Push) ★★★
+      - name: Commit state changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "Stock Bot"
+          # 모든 txt 파일(상태 저장용)을 스테이징
+          git add *.txt
+          # 변경사항이 있을 때만 커밋하고 푸시
+          git commit -m "Update bot status [skip ci]" || echo "No changes to commit"
+          git push
