@@ -1,9 +1,11 @@
 name: Stock Analysis Bot
 
 on:
-  schedule:
-    # 한국 시간 오후 11:00 (UTC 14:00)
-    - cron: '47 * * * *'
+  # 외부 크론(cron-job.org)에서 신호를 보낼 때 실행되는 트리거
+  repository_dispatch:
+    types: [stock-check]
+    
+  # 깃허브 웹사이트에서 수동으로 버튼 눌러 실행하고 싶을 때 사용
   workflow_dispatch:
 
 jobs:
@@ -26,10 +28,8 @@ jobs:
 
       - name: Run analysis
         env:
-          # 1. QQQ 매일 현황용
+          # 깃허브 Settings > Secrets and variables > Actions에 등록된 키값들
           WEBHOOK_QQQ: ${{ secrets.WEBHOOK_QQQ }}
-          # 2. TQQQ 매수 신호용
           WEBHOOK_SIGNAL: ${{ secrets.WEBHOOK_SIGNAL }}
-          # 3. 우량주 스캐너용 (새로 추가)
           WEBHOOK_RSI: ${{ secrets.WEBHOOK_RSI }}
         run: python main.py
