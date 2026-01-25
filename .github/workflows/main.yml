@@ -1,14 +1,14 @@
 name: Stock Analysis Bot
 
 on:
-  # 외부(cron-job.org)에서 보내는 신호 받기
+  # 외부(cron-job.org)에서 5분마다 신호를 보내면 실행
   repository_dispatch:
     types: [stock-check]
     
-  # 수동 실행 버튼
+  # 깃허브 홈페이지에서 수동으로 실행 버튼 누를 때
   workflow_dispatch:
 
-# ★★★ 중요: 파일 쓰기(Commit) 권한 부여 ★★★
+# ★★★ [핵심] 봇이 상태 파일(txt)을 쓰고 저장할 권한 부여 ★★★
 permissions:
   contents: write
 
@@ -27,22 +27,32 @@ jobs:
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install yfinance pandas numpy requests
 
       - name: Run analysis
         env:
+          # Settings > Secrets에 등록한 웹훅 주소들
           WEBHOOK_QQQ: ${{ secrets.WEBHOOK_QQQ }}
           WEBHOOK_SIGNAL: ${{ secrets.WEBHOOK_SIGNAL }}
           WEBHOOK_RSI: ${{ secrets.WEBHOOK_RSI }}
         run: python main.py
 
-      # ★★★ 상태 파일 변경 시 저장(Commit & Push) ★★★
+      # ★★★ [중요] 상태 파일 저장 단계 (에러 방지 처리 완료) ★★★
       - name: Commit state changes
         run: |
+          # 1. 깃허브 봇 계정 설정
           git config --local user.email "action@github.com"
           git config --local user.name "Stock Bot"
-          # 모든 txt 파일(상태 저장용)을 스테이징
-          git add *.txt
-          # 변경사항이 있을 때만 커밋하고 푸시
-          git commit -m "Update bot status [skip ci]" || echo "No changes to commit"
-          git push
+          
+          # 2. 텍스트 파일 추가 (파일이 없어도 에러 안 나게 '|| true' 추가)
+          git add *.txt || true
+          
+          # 3. 실제로 변경된 내용이 있을 때만 커밋 & 푸시
+          if ! git diff --staged --quiet; then
+            git commit -m "Update bot status [skip ci]"
+            git push
+            echo "✅ 상태 파일이 업데이트되어 저장했습니다."
+          else
+            echo "💤 변경된 내용이 없어서 저장을 건너뜁니다."
+          fi
