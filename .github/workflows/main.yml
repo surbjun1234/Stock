@@ -2,14 +2,14 @@ name: Stock Bot Run
 
 on:
   schedule:
-    - cron: '*/10 13-20 * * 1-5'  # 평일 미국장 시간 (한국시간 밤 10시~새벽 5시) 10분마다
+    - cron: '*/10 13-20 * * 1-5'  # 평일 한국시간 밤 10시 ~ 새벽 5시 (미국장 개장 시간 집중)
   workflow_dispatch:              # 수동 실행 버튼
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
-    # 중요: 봇이 파일을 쓰고 저장할 수 있도록 권한 부여
+    # ★ 파일 저장을 위한 권한 설정 (필수)
     permissions:
       contents: write
 
@@ -24,7 +24,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas yfinance requests
+          pip install -r requirements.txt
 
       - name: Run Trading Bot
         env:
@@ -34,15 +34,15 @@ jobs:
         run: |
           python main.py
 
-      # ▼▼▼ [핵심: 상태 파일 저장 단계] ▼▼▼
+      # ★ 봇의 기억(파일)을 깃허브에 저장하는 단계
       - name: Commit and Push state files
         run: |
           git config --global user.name "GitHub Action Bot"
           git config --global user.email "action@github.com"
           
-          # 변경된 상태 파일이 있으면 git에 추가
+          # 상태 파일들 추가
           git add scanner_state.json qqq_alert_state.txt last_daily_briefing.txt || true
           
-          # 커밋하고 푸시 (내용이 바뀐게 없으면 에러 안나게 처리)
+          # 변경사항이 있으면 커밋 및 푸시
           git commit -m "Update bot state [skip ci]" || echo "No changes to commit"
           git push
