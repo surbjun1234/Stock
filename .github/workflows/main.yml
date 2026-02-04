@@ -1,58 +1,48 @@
-name: Stock Analysis Bot
+name: Stock Bot Run
 
 on:
-  # 외부(cron-job.org)에서 5분마다 신호를 보내면 실행
-  repository_dispatch:
-    types: [stock-check]
-    
-  # 깃허브 홈페이지에서 수동으로 실행 버튼 누를 때
-  workflow_dispatch:
-
-# ★★★ [핵심] 봇이 상태 파일(txt)을 쓰고 저장할 권한 부여 ★★★
-permissions:
-  contents: write
+  schedule:
+    - cron: '*/10 13-20 * * 1-5'  # 평일 미국장 시간 (한국시간 밤 10시~새벽 5시) 10분마다
+  workflow_dispatch:              # 수동 실행 버튼
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
 
+    # 중요: 봇이 파일을 쓰고 저장할 수 있도록 권한 부여
+    permissions:
+      contents: write
+
     steps:
-      - name: Checkout code
+      - name: Check out code
         uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.9'
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install yfinance pandas numpy requests
+          pip install pandas yfinance requests
 
-      - name: Run analysis
+      - name: Run Trading Bot
         env:
-          # Settings > Secrets에 등록한 웹훅 주소들
           WEBHOOK_QQQ: ${{ secrets.WEBHOOK_QQQ }}
           WEBHOOK_SIGNAL: ${{ secrets.WEBHOOK_SIGNAL }}
           WEBHOOK_RSI: ${{ secrets.WEBHOOK_RSI }}
-        run: python main.py
-
-      # ★★★ [중요] 상태 파일 저장 단계 (에러 방지 처리 완료) ★★★
-      - name: Commit state changes
         run: |
-          # 1. 깃허브 봇 계정 설정
-          git config --local user.email "action@github.com"
-          git config --local user.name "Stock Bot"
+          python main.py
+
+      # ▼▼▼ [핵심: 상태 파일 저장 단계] ▼▼▼
+      - name: Commit and Push state files
+        run: |
+          git config --global user.name "GitHub Action Bot"
+          git config --global user.email "action@github.com"
           
-          # 2. 텍스트 파일 추가 (파일이 없어도 에러 안 나게 '|| true' 추가)
-          git add *.txt || true
+          # 변경된 상태 파일이 있으면 git에 추가
+          git add scanner_state.json qqq_alert_state.txt last_daily_briefing.txt || true
           
-          # 3. 실제로 변경된 내용이 있을 때만 커밋 & 푸시
-          if ! git diff --staged --quiet; then
-            git commit -m "Update bot status [skip ci]"
-            git push
-            echo "✅ 상태 파일이 업데이트되어 저장했습니다."
-          else
-            echo "💤 변경된 내용이 없어서 저장을 건너뜁니다."
-          fi
+          # 커밋하고 푸시 (내용이 바뀐게 없으면 에러 안나게 처리)
+          git commit -m "Update bot state [skip ci]" || echo "No changes to commit"
+          git push
