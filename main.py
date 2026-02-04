@@ -8,12 +8,12 @@ from datetime import datetime, timedelta, timezone
 # --- [0] 기본 설정 ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# 웹훅 설정 (Github Secrets에서 가져옴)
+# 웹훅 설정
 QQQ_WEBHOOK = os.environ.get("WEBHOOK_QQQ")       
 SIGNAL_WEBHOOK = os.environ.get("WEBHOOK_SIGNAL") 
 RSI_WEBHOOK = os.environ.get("WEBHOOK_RSI")       
 
-# 전략 파라미터
+# 파라미터
 QQQ_TICKER = "QQQ"
 MA_SHORT = 120
 MA_LONG = 233
@@ -30,7 +30,7 @@ WATCHLIST = [
     "TM", "NVO", "ASML", "SAP", "AZN", "BABA", "PDD"
 ]
 
-# --- [1] 파일 처리 함수 (매우 중요) ---
+# --- [1] 파일 처리 함수 ---
 def get_file_content(filename):
     path = os.path.join(BASE_DIR, filename)
     if os.path.exists(path):
@@ -52,7 +52,7 @@ def calculate_rsi(series, period=14):
     rs = ema_up / (ema_down + 1e-10)
     return 100 - (100 / (1 + rs))
 
-# --- [2] 기능: QQQ 감시 ---
+# --- [2] QQQ 감시 ---
 def check_qqq_realtime_alert():
     print("\n📡 [Realtime] QQQ 감시 중...")
     try:
@@ -65,9 +65,10 @@ def check_qqq_realtime_alert():
         ma233 = float(df.rolling(window=MA_LONG).mean().iloc[-1])
         rsi = float(calculate_rsi(df).iloc[-1])
         target_ma = max(ma120, ma233)
+        last_date = df.index[-1].strftime("%Y-%m-%d")
 
         state_file = "qqq_alert_state.txt"
-        last_state = get_file_content(state_file) # "BUY" or "NORMAL" or ""
+        last_state = get_file_content(state_file)
         
         is_buy_zone = (curr_price < target_ma) and (rsi < QQQ_RSI_THRESHOLD)
 
@@ -76,7 +77,7 @@ def check_qqq_realtime_alert():
                 "content": "🚨 **[TQQQ 매수 기회 발생]**",
                 "embeds": [{
                     "title": "진입 조건 충족",
-                    "description": f"• 가격: `${curr_price:.2f}`\n• RSI: `{rsi:.2f}`",
+                    "description": f"• 가격: `${curr_price:.2f}`\n• RSI: `{rsi:.2f}`\n• 기준일: {last_date}",
                     "color": 15158332
                 }]
             }
@@ -92,17 +93,14 @@ def check_qqq_realtime_alert():
             if SIGNAL_WEBHOOK: requests.post(SIGNAL_WEBHOOK, json=msg)
             save_file_content(state_file, "NORMAL")
             print("  => 🟢 회복 신호 전송")
-        else:
-            print("  => QQQ 상태 유지 중")
 
     except Exception as e:
         print(f"❌ QQQ 에러: {e}")
 
-# --- [3] 기능: 우량주 스캐너 (중복 알림 방지 적용) ---
+# --- [3] 우량주 스캐너 (중복 방지 강화) ---
 def check_watchlist_realtime_alert():
     print("\n🔭 [Realtime] 우량주 스캐너 감시 중...")
     
-    # 1. 이전 상태 불러오기
     state_file = "scanner_state.json"
     prev_content = get_file_content(state_file)
     try:
@@ -135,7 +133,7 @@ def check_watchlist_realtime_alert():
                         current_detected[ticker] = {"price": price, "rsi": rsi}
             except: continue
 
-        # 2. 신규 진입 (이번엔 있고, 지난번엔 없던 것만!)
+        # 신규 진입 (이번엔 있고, 지난번엔 없던 것)
         new_tickers = [t for t in current_detected if t not in prev_detected]
         
         if new_tickers:
@@ -151,7 +149,7 @@ def check_watchlist_realtime_alert():
             if RSI_WEBHOOK: requests.post(RSI_WEBHOOK, json=msg)
             print(f"  => 🚨 신규 알림: {new_tickers}")
 
-        # 3. 회복 (지난번엔 있고, 이번엔 없는 것)
+        # 회복 (지난번엔 있고, 이번엔 없는 것)
         recovered_tickers = [t for t in prev_detected if t not in current_detected]
         if recovered_tickers:
             msg = {
@@ -161,16 +159,13 @@ def check_watchlist_realtime_alert():
             if RSI_WEBHOOK: requests.post(RSI_WEBHOOK, json=msg)
             print(f"  => 🟢 회복 알림: {recovered_tickers}")
 
-        # 4. 상태 저장 (GitHub에 반영될 파일)
+        # ★ 상태 저장 (핵심)
         save_file_content(state_file, json.dumps(current_detected))
-        
-        if not new_tickers and not recovered_tickers:
-            print("  => 변동 사항 없음 (Silent)")
 
     except Exception as e:
         print(f"❌ 스캐너 에러: {e}")
 
-# --- [4] 기능: 정기 브리핑 ---
+# --- [4] 정기 브리핑 ---
 def send_daily_qqq_briefing(today_str):
     print(f"\n📅 [Schedule] 정기 브리핑...")
     try:
@@ -180,7 +175,7 @@ def send_daily_qqq_briefing(today_str):
         rsi = float(calculate_rsi(df).iloc[-1])
         
         payload = {
-            "content": f"🌙 **[{today_str}] QQQ 마감**",
+            "content": f"🌙 **[{today_str}] QQQ 마감 브리핑**",
             "embeds": [{"description": f"Close: `${price:.2f}`\nRSI: `{rsi:.2f}`", "color": 3447003}]
         }
         if QQQ_WEBHOOK: requests.post(QQQ_WEBHOOK, json=payload)
@@ -199,7 +194,7 @@ def main():
     check_qqq_realtime_alert()
     check_watchlist_realtime_alert()
 
-    # 23시에만 브리핑 실행
+    # 밤 11시에만 브리핑 (미국장 시작 전후)
     if current_hour == 23:
         log_file = "last_daily_briefing.txt"
         last_run = get_file_content(log_file)
