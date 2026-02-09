@@ -1,15 +1,22 @@
 name: Stock Bot Run
 
 on:
+  # 1. 깃허브 내부 스케줄러 (평일 밤 10시 ~ 새벽 5시, 10분 간격)
   schedule:
-    - cron: '*/10 13-20 * * 1-5'  # 평일 한국시간 밤 10시 ~ 새벽 5시 (미국장 개장 시간 집중)
-  workflow_dispatch:              # 수동 실행 버튼
+    - cron: '*/10 13-20 * * 1-5'
+
+  # 2. 수동 실행 버튼
+  workflow_dispatch:
+
+  # 3. ★ 외부 크론잡(cron-job.org) 신호 받기 추가 ★
+  repository_dispatch:
+    types: [trigger_from_cron]
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
-    # ★ 파일 저장을 위한 권한 설정 (필수)
+    # 파일 저장을 위한 권한 설정 (필수)
     permissions:
       contents: write
 
@@ -34,13 +41,13 @@ jobs:
         run: |
           python main.py
 
-      # ★ 봇의 기억(파일)을 깃허브에 저장하는 단계
+      # 봇의 기억(파일)을 깃허브에 저장하는 단계
       - name: Commit and Push state files
         run: |
           git config --global user.name "GitHub Action Bot"
           git config --global user.email "action@github.com"
           
-          # 상태 파일들 추가
+          # 상태 파일들 추가 (파일이 없어도 에러 안 나게 || true 추가됨)
           git add scanner_state.json qqq_alert_state.txt last_daily_briefing.txt || true
           
           # 변경사항이 있으면 커밋 및 푸시
